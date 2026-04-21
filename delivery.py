@@ -533,14 +533,28 @@ def _gerar_arquivos():
         })
 
     arquivos["index.html"] = renderizar_indice(entradas)
+    # Força Content-Type correto no Netlify. Sem isso, em alguns deploys
+    # (especialmente com zip de poucos arquivos) o .html vai como text/plain.
+    arquivos["_headers"] = (
+        "/*\n"
+        "  Content-Type: text/html; charset=utf-8\n"
+        "/*.html\n"
+        "  Content-Type: text/html; charset=utf-8\n"
+    )
     return arquivos, entradas
 
 
 def _criar_zip(arquivos):
+    # ZipInfo explícito com external_attr de arquivo regular (rw-r--r--).
+    # Sem isso, o Netlify serve .html como text/plain porque o entry fica
+    # sem os bits de "arquivo regular" e a heurística de content-type quebra.
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for nome, conteudo in arquivos.items():
-            zf.writestr(nome, conteudo)
+            info = zipfile.ZipInfo(nome)
+            info.external_attr = 0o100644 << 16  # arquivo regular, perms 644
+            info.compress_type = zipfile.ZIP_DEFLATED
+            zf.writestr(info, conteudo)
     buf.seek(0)
     return buf.read()
 
