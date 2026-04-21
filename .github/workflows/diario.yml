@@ -1,0 +1,61 @@
+name: Jornal de IA diário
+
+# Roda diariamente às 08:15 UTC (~05:15 BRT), logo após o reset da cota
+# diária do Gemini (00:00 PT = 04:00 BRT em horário padrão). Cron do
+# GitHub Actions tem drift de 5-30min em horários de pico, então 08:15
+# UTC dá folga pra cair na faixa 05:15-05:45 BRT.
+#
+# workflow_dispatch: permite rodar manualmente pela interface do GitHub
+# (Actions → Jornal de IA diário → Run workflow). Útil pra teste.
+on:
+  schedule:
+    - cron: "15 8 * * *"
+  workflow_dispatch:
+
+# Precisa de write pra commitar os .md novos de volta no repo.
+permissions:
+  contents: write
+
+jobs:
+  rodar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout do repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+
+      - name: Rodar jornal
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'gemini' }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          EMAIL_DESTINO: ${{ secrets.EMAIL_DESTINO }}
+          NETLIFY_TOKEN: ${{ secrets.NETLIFY_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+        run: python main.py
+
+      - name: Commitar novo markdown do jornal
+        # Mesmo se o passo anterior falhar, tenta commitar o que tiver em
+        # jornal/ (pode ter salvo a cópia antes do erro no email).
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add jornal/ || true
+          if git diff --staged --quiet; then
+            echo "Nada novo em jornal/ pra commitar."
+          else
+            git commit -m "jornal: edição de $(date -u +%Y-%m-%d)"
+            git push
+          fi
