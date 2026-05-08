@@ -1,4 +1,6 @@
 .env
+.claude/
+_preview/
 venv/
 __pycache__/
 *.pyc

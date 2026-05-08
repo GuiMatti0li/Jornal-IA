@@ -19,7 +19,10 @@ import os
 import re
 import zipfile
 from collections import OrderedDict
-from datetime import date, datetime
+from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
+
+_TZ_BR = ZoneInfo("America/Sao_Paulo")
 from pathlib import Path
 
 import markdown as md_lib
@@ -32,15 +35,25 @@ load_dotenv(override=True)
 PASTA_JORNAL      = Path(__file__).parent / "jornal"
 NETLIFY_TOKEN     = os.getenv("NETLIFY_TOKEN")
 NETLIFY_SITE_ID   = os.getenv("NETLIFY_SITE_ID")
-REMETENTE_PADRAO  = "AI Digest <onboarding@resend.dev>"
+REMETENTE_PADRAO  = "Jornal <onboarding@resend.dev>"
 
 # ── Paleta compartilhada (site e email usam as mesmas cores) ──────────────────
 _BG      = "#0f1115"
 _CARD    = "#1a1d24"
 _BORDER  = "#2a2e38"
-_TEXT    = "#e4e6eb"
-_MUTED   = "#9aa0ab"
-_ACCENT  = "#7cb3ff"
+_TEXT    = "#f5f6f8"
+_MUTED   = "#d0d4de"
+_ACCENT  = "#9ec5ff"
+
+
+# Remove crases ao redor de links markdown — o LLM frequentemente envolve as
+# fontes em ` [Nome](url) ` (code span), o que faz a markdown engine renderizar
+# o texto literal "[Nome](url)" no lugar do link clicável.
+_LINK_EM_CODE = re.compile(r"`(\s*\[[^\]]+\]\([^)]+\)(?:\s*/\s*\[[^\]]+\]\([^)]+\))*\s*)`")
+
+
+def _desencodar_fontes(markdown_texto):
+    return _LINK_EM_CODE.sub(lambda m: m.group(1).strip(), markdown_texto)
 
 # ╔══════════════════════════════════════════════════════════════════════════════
 # ║  SITE — rendering HTML para o Netlify
@@ -61,7 +74,7 @@ body {{
 }}
 .container {{ max-width: 720px; margin: 0 auto; }}
 h1 {{ font-size: 2rem; margin: 0 0 0.25rem; letter-spacing: -0.02em; }}
-.periodo {{ color: var(--muted); font-size: 0.9rem; margin-bottom: 2.5rem; }}
+.periodo {{ color: var(--text); font-size: 0.95rem; margin-bottom: 2.5rem; }}
 h2 {{
   font-size: 1.4rem; margin: 2.5rem 0 1rem;
   padding-bottom: 0.5rem; border-bottom: 1px solid var(--border);
@@ -114,6 +127,14 @@ ul.indice li {{
 ul.indice li:hover {{ border-color: var(--accent); }}
 ul.indice a {{ font-weight: 500; }}
 .periodo-item {{ color: var(--muted); font-size: 0.85rem; }}
+.btn-arquivo {{
+  display: inline-block; margin: 1rem 0 2rem;
+  padding: 0.6rem 1.1rem; background: var(--card);
+  border: 1px solid var(--accent); border-radius: 8px;
+  color: var(--accent); font-weight: 500; font-size: 0.95rem;
+  transition: background 0.15s, color 0.15s;
+}}
+.btn-arquivo:hover {{ background: var(--accent); color: var(--bg); border-bottom-color: var(--accent); }}
 @media (max-width: 600px) {{
   body {{ font-size: 16px; padding: 1.5rem 0.75rem 3rem; }}
   h1 {{ font-size: 1.6rem; }}
@@ -204,6 +225,8 @@ def renderizar_edicao(markdown_texto, titulo="Jornal de IA"):
         modelo_label = m2.group(1).strip()
         markdown_texto = markdown_texto[m2.end():]
 
+    markdown_texto = _desencodar_fontes(markdown_texto)
+    markdown_texto = markdown_texto.replace("## TL;DR", "## Visão Geral")
     html_corpo = md_lib.markdown(markdown_texto, extensions=["extra"])
     partes = re.split(r"(<h2>.*?</h2>)", html_corpo, flags=re.DOTALL)
     resultado = []
@@ -214,7 +237,7 @@ def renderizar_edicao(markdown_texto, titulo="Jornal de IA"):
             resultado.append(parte)
         else:
             anterior = partes[i - 1] if i > 0 else ""
-            if "tl;dr" in anterior.lower():
+            if "visão geral" in anterior.lower():
                 resultado.append(f'<div class="tldr">{parte}</div>')
             else:
                 resultado.append(_paragrafos_em_details(parte))
@@ -224,6 +247,7 @@ def renderizar_edicao(markdown_texto, titulo="Jornal de IA"):
         f'padding:2px 7px;border-radius:4px;color:#c9ccd3;">{modelo_label}</code>'
     ) if modelo_label else ""
     periodo_html = f'<div class="periodo">{periodo}{modelo_tag}</div>' if periodo else ""
+    botao_arquivo = '<a href="index.html" class="btn-arquivo">📚 Ver todas as edições</a>'
 
     return f"""<!DOCTYPE html>
 <html lang="pt-BR">
@@ -237,8 +261,10 @@ def renderizar_edicao(markdown_texto, titulo="Jornal de IA"):
 <div class="container">
 <h1>🤖 {titulo}</h1>
 {periodo_html}
+{botao_arquivo}
 {"".join(resultado)}
-<div class="footer">Jornal de IA · <a href="/">← todas as edições</a></div>
+{botao_arquivo}
+<div class="footer">Jornal de IA · <a href="index.html">← todas as edições</a></div>
 </div>
 </body>
 </html>"""
@@ -247,7 +273,7 @@ def renderizar_edicao(markdown_texto, titulo="Jornal de IA"):
 def renderizar_indice(entradas):
     """Gera index.html com a lista de edições (mais recente primeiro)."""
     itens = [
-        f'<li><a href="/{e["nome"]}">{e["titulo"]}</a>'
+        f'<li><a href="{e["nome"]}">{e["titulo"]}</a>'
         f'<span class="periodo-item">{e["periodo"]}</span></li>'
         for e in entradas
     ] if entradas else ["<li class='sem-destaque'>Ainda sem edições.</li>"]
@@ -286,12 +312,18 @@ _CSS_EMAIL = f"""
   .wrapper {{ max-width: 680px; margin: 0 auto; padding: 32px 20px 48px; }}
   .header {{ border-bottom: 1px solid {_BORDER}; padding-bottom: 20px; margin-bottom: 28px; }}
   .header h1 {{ font-size: 26px; margin: 0 0 6px; color: #fff; letter-spacing: -0.02em; }}
-  .header .meta {{ color: {_MUTED}; font-size: 13px; margin: 0; }}
+  .header .meta {{ color: {_TEXT}; font-size: 14px; margin: 0; }}
   .banner {{
-    background: #1a2540; border: 1px solid #2d4780; border-radius: 8px;
-    padding: 14px 18px; margin-bottom: 28px; font-size: 15px;
+    background: #2a3f70; border: 1px solid #4a6db8; border-radius: 8px;
+    padding: 14px 18px; margin-bottom: 16px; font-size: 15px; color: #fff;
   }}
-  .banner a {{ color: {_ACCENT}; font-weight: 600; text-decoration: none; }}
+  .banner a {{ color: #ffffff; font-weight: 700; text-decoration: underline; }}
+  .btn-arquivo-email {{
+    display: inline-block; padding: 12px 20px; margin-bottom: 28px;
+    background: {_CARD}; border: 1px solid {_ACCENT}; border-radius: 8px;
+    color: {_ACCENT} !important; font-weight: 600; text-decoration: none !important;
+    font-size: 15px;
+  }}
   h2 {{
     font-size: 20px; margin: 32px 0 14px;
     padding-bottom: 6px; border-bottom: 1px solid {_BORDER};
@@ -303,15 +335,15 @@ _CSS_EMAIL = f"""
   em {{ color: {_MUTED}; font-style: normal; }}
   blockquote {{
     border-left: 3px solid {_ACCENT}; background: {_CARD};
-    padding: 12px 18px; margin: 0 0 14px; border-radius: 0 6px 6px 0; color: #c9ccd3;
+    padding: 12px 18px; margin: 0 0 14px; border-radius: 0 6px 6px 0; color: #eef0f4;
   }}
   blockquote p {{ margin: 0; }}
   .item {{
     background: {_CARD}; border: 1px solid {_BORDER};
     border-radius: 8px; padding: 16px 20px; margin-bottom: 14px;
   }}
-  .item .gancho {{ margin: 0 0 10px; padding-bottom: 10px; border-bottom: 1px solid {_BORDER}; }}
-  .item .corpo {{ margin: 0; color: #c9ccd3; font-size: 15px; }}
+  .item .gancho {{ margin: 0 0 10px; padding-bottom: 10px; border-bottom: 1px solid {_BORDER}; color: #fff; }}
+  .item .corpo {{ margin: 0; color: #eef0f4; font-size: 15px; }}
   .sem-destaque {{ color: {_MUTED}; font-style: italic; padding: 8px 0; }}
   .tldr {{
     background: {_CARD}; border-left: 3px solid {_ACCENT};
@@ -319,10 +351,10 @@ _CSS_EMAIL = f"""
   }}
   .tldr p {{ margin: 6px 0; }}
   ul {{ padding-left: 20px; }}
-  li {{ margin-bottom: 6px; color: #c9ccd3; }}
+  li {{ margin-bottom: 6px; color: #eef0f4; }}
   .modelo {{
     display: inline-block; background: {_CARD};
-    padding: 2px 8px; border-radius: 4px; color: #c9ccd3;
+    padding: 2px 8px; border-radius: 4px; color: #eef0f4;
     font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px;
   }}
   .footer {{
@@ -347,7 +379,7 @@ def _email_wrap_items(html_corpo):
             continue
         if i == 0 and not parte.strip():
             continue
-        if "tl;dr" in secao_atual:
+        if "visão geral" in secao_atual:
             resultado.append(f'<div class="tldr">{parte}</div>')
             continue
         if not parte.strip() or parte.strip().startswith("<blockquote"):
@@ -372,19 +404,27 @@ def _email_wrap_items(html_corpo):
 
             if _eh_citacao_solta(atual) and blocos and blocos[-1].startswith('<div class="item">'):
                 if blocos[-1].endswith("</div>"):
-                    citacao = atual.replace("<p>", '<p class="corpo">', 1)
+                    citacao = atual.replace(
+                        "<p>",
+                        '<p style="margin:10px 0 0;padding:6px 10px;'
+                        'background:#0f1623;border-radius:4px;font-size:13px;">',
+                        1,
+                    )
                     blocos[-1] = blocos[-1][:-len("</div>")] + citacao + "</div>"
                     j += 1
                     continue
 
             proximo = paragrafos[j + 1] if j + 1 < len(paragrafos) else None
-            if proximo and "<strong>" in atual.lower():
-                gancho = atual.replace("<p>", '<p class="gancho">', 1)
-                corpo = proximo.replace("<p>", '<p class="corpo">', 1)
+            proximo_e_gancho = proximo and "<strong>" in proximo.lower()
+            _S_GANCHO = 'style="font-size:16px;color:#ffffff;margin:0 0 14px;padding-bottom:12px;border-bottom:1px solid #2a2e38;line-height:1.5;"'
+            _S_CORPO  = 'style="font-size:15px;color:#d0d4de;margin:0;line-height:1.65;"'
+            if proximo and "<strong>" in atual.lower() and not proximo_e_gancho and not _eh_citacao_solta(proximo):
+                gancho = atual.replace("<p>", f'<p class="gancho" {_S_GANCHO}>', 1)
+                corpo = proximo.replace("<p>", f'<p class="corpo" {_S_CORPO}>', 1)
                 blocos.append(f'<div class="item">{gancho}{corpo}</div>')
                 j += 2
             else:
-                envolvido = atual.replace("<p>", '<p class="corpo">', 1)
+                envolvido = atual.replace("<p>", f'<p class="corpo" {_S_CORPO}>', 1)
                 blocos.append(f'<div class="item">{envolvido}</div>')
                 j += 1
 
@@ -393,7 +433,7 @@ def _email_wrap_items(html_corpo):
     return "".join(resultado)
 
 
-def _renderizar_email_html(markdown_texto, url_interativa=None, modelo=None):
+def _renderizar_email_html(markdown_texto, url_interativa=None, modelo=None, url_arquivo=None):
     """Converte markdown do digest → HTML estilizado pra email."""
     # Extrai período do cabeçalho antes de remover as linhas *...*
     periodo_extraido = ""
@@ -401,11 +441,62 @@ def _renderizar_email_html(markdown_texto, url_interativa=None, modelo=None):
     if m and "Período coberto" in m.group(1):
         periodo_extraido = m.group(1).strip()
 
+    # Corrige texto legado "no digest" → "no jornal"
+    periodo_extraido = periodo_extraido.replace("no digest", "no jornal")
+    # Corrige TL;DR → Visão Geral em mds antigos
+    markdown_texto = markdown_texto.replace("## TL;DR", "## Visão Geral")
+
     # Remove todas as linhas de cabeçalho *...* do markdown
     markdown_texto = re.sub(r"^(\*[^\n]+\*\s*\n)+", "", markdown_texto)
+    markdown_texto = _desencodar_fontes(markdown_texto)
 
     corpo_html = md_lib.markdown(markdown_texto, extensions=["extra", "sane_lists"])
     corpo_html = _email_wrap_items(corpo_html)
+    # Estiliza blockquotes de especialistas com inline styles
+    corpo_html = re.sub(
+        r"<blockquote>\s*<p>(.*?)</p>\s*</blockquote>",
+        r'<blockquote style="border-left:3px solid #7c6fff;background:#1a1a2e;'
+        r'padding:10px 16px;margin:10px 0 6px;border-radius:0 6px 6px 0;">'
+        r'<p style="margin:0;font-size:14px;color:#d0d4de;font-style:italic;">\1</p></blockquote>',
+        corpo_html, flags=re.DOTALL,
+    )
+
+    # Envolve a seção "Fontes do dia" numa caixa com fundo
+    corpo_html = re.sub(
+        r'(<h2[^>]*>Fontes do dia</h2>)(.*?)(?=<h2|$)',
+        lambda m: m.group(1) + f'<div style="background:#1a1d24;border:1px solid #2a2e38;border-radius:8px;padding:14px 18px;margin-top:10px;font-size:14px;color:{_MUTED};line-height:2;">' + m.group(2) + '</div>',
+        corpo_html, flags=re.DOTALL,
+    )
+
+    # Quando título e corpo estão no mesmo <p>, separa o <strong> em bloco
+    def _split_gancho_corpo(m):
+        before = m.group(1)
+        titulo = m.group(2)
+        resto  = m.group(3).strip()
+        titulo_html = (
+            f'<strong style="display:block;font-size:17px;color:#9ec5ff;'
+            f'font-weight:700;margin-bottom:12px;padding-bottom:12px;'
+            f'border-bottom:1px solid #2a2e38;line-height:1.4;">{titulo}</strong>'
+        )
+        corpo_html_inner = (
+            f'<span style="font-size:15px;color:#d0d4de;line-height:1.65;">{resto}</span>'
+            if resto else ""
+        )
+        return f"{before}{titulo_html}{corpo_html_inner}</p>"
+
+    corpo_html = re.sub(
+        r'(<p[^>]*>)<strong>(.*?)</strong>\s*(.+?)</p>',
+        _split_gancho_corpo,
+        corpo_html, flags=re.DOTALL,
+    )
+    # Inline styles nos h2 — Gmail ignora <style>, precisa ser inline
+    corpo_html = re.sub(
+        r"<h2>(.*?)</h2>",
+        r'<h2 style="font-size:18px;color:#ffffff;background:#1e2a3a;'
+        r'border-left:3px solid #9ec5ff;margin:28px 0 14px;'
+        r'padding:10px 16px;border-radius:0 6px 6px 0;">\1</h2>',
+        corpo_html,
+    )
 
     data_curta = date.today().strftime("%d/%m/%y")
     data_longa  = date.today().strftime("%d/%m/%Y")
@@ -420,13 +511,19 @@ def _renderizar_email_html(markdown_texto, url_interativa=None, modelo=None):
 
     banner = (
         f'<div class="banner">📱 '
-        f'<a href="{url_interativa}">Abrir versão interativa com dropdowns</a>'
+        f'<a href="{url_interativa}" style="color:#ffffff;font-weight:700;text-decoration:underline;">Abrir versão interativa com dropdowns</a>'
         f' — recomendado no celular.</div>'
     ) if url_interativa else ""
 
-    footer_partes = [f'Enviado em {datetime.now().strftime("%d/%m/%Y %H:%M")}']
+    botao_arquivo = (
+        f'<a href="{url_arquivo}" class="btn-arquivo-email">📚 Ver todas as edições</a>'
+    ) if url_arquivo else ""
+
+    footer_partes = [f'Enviado em {datetime.now(timezone.utc).astimezone(_TZ_BR).strftime("%d/%m/%Y %H:%M")} (BRT)']
     if url_interativa:
         footer_partes.append(f'<a href="{url_interativa}">Ver versão interativa</a>')
+    if url_arquivo:
+        footer_partes.append(f'<a href="{url_arquivo}">Arquivo de edições anteriores</a>')
     footer_html = "<br>".join(footer_partes)
 
     return f"""<!DOCTYPE html>
@@ -435,16 +532,17 @@ def _renderizar_email_html(markdown_texto, url_interativa=None, modelo=None):
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="color-scheme" content="dark">
-<title>Jornal de IA do dia {data_curta}</title>
+<title>Jornal {data_curta}</title>
 {_CSS_EMAIL}
 </head>
 <body>
 <div class="wrapper">
-<div class="header">
-<h1>🤖 Jornal de IA do dia {data_curta}</h1>
-<p class="meta">{meta_linha}</p>
+<div class="header" style="background:#1a2235;border-radius:10px;padding:20px 24px;margin-bottom:24px;border:1px solid #2d4780;">
+<h1 style="font-size:26px;margin:0 0 8px;color:#ffffff;letter-spacing:-0.02em;">📰 Jornal {data_curta}</h1>
+<p class="meta" style="color:{_TEXT};font-size:14px;margin:0;">{meta_linha}</p>
 </div>
 {banner}
+{botao_arquivo}
 {corpo_html}
 <div class="footer">{footer_html}</div>
 </div>
@@ -453,7 +551,7 @@ def _renderizar_email_html(markdown_texto, url_interativa=None, modelo=None):
 
 
 def enviar_email(assunto, corpo_markdown, assunto_padrao=True,
-                 url_interativa=None, modelo=None):
+                 url_interativa=None, modelo=None, url_arquivo=None):
     """
     Envia o digest por email via Resend.
 
@@ -472,10 +570,11 @@ def enviar_email(assunto, corpo_markdown, assunto_padrao=True,
         raise RuntimeError("EMAIL_DESTINO não definida no .env")
 
     if not assunto and assunto_padrao:
-        assunto = f"Jornal de IA do dia {date.today().strftime('%d/%m/%y')}"
+        assunto = f"Jornal {date.today().strftime('%d/%m/%y')}"
 
     corpo_html = _renderizar_email_html(
-        corpo_markdown, url_interativa=url_interativa, modelo=modelo
+        corpo_markdown, url_interativa=url_interativa, modelo=modelo,
+        url_arquivo=url_arquivo,
     )
 
     resend.api_key = api_key
@@ -562,7 +661,7 @@ def _criar_zip(arquivos):
 def publicar():
     """
     Renderiza todo o jornal e faz deploy no Netlify.
-    Retorna a URL da edição mais recente.
+    Retorna (url_edicao_mais_recente, url_arquivo_indice).
     """
     if not NETLIFY_TOKEN or not NETLIFY_SITE_ID:
         raise RuntimeError("NETLIFY_TOKEN ou NETLIFY_SITE_ID não definidos no .env")
@@ -596,5 +695,5 @@ def publicar():
     if entradas:
         url_edicao = f"{url_site}/{entradas[0]['nome']}"
         print(f"[publisher] edição mais recente: {url_edicao}")
-        return url_edicao
-    return url_site
+        return url_edicao, url_site
+    return url_site, url_site
