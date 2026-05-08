@@ -73,24 +73,37 @@ esgotar os artigos). Tier C irrelevante demais pode ser omitido mesmo assim \
 
 PASSO 2 — ESTRUTURA:
 
-## TL;DR
-EXATAMENTE 3 frases:
-  1. Tese do dia em uma frase (se teve tema dominante, qual).
+## Visão Geral
+3 a 5 frases cobrindo:
+  1. Tese do dia — o tema ou força dominante, se houver.
   2. Segundo eixo, contraponto, ou "foi um dia pulverizado".
-  3. Começar com "Implicação prática:" ou "O que observar:" — uma frase \
+  3. De 1 a 3 destaques concretos do dia — os itens mais relevantes do \
+jornal, citados pelo nome (ex: "O lançamento do X pela empresa Y foi o \
+movimento mais significativo"). Pode ser numa frase só se couber, ou em \
+frases separadas.
+  4. Começar com "Implicação prática:" ou "O que observar:" — uma frase \
 orientada a DECISÃO, não a fato. O que alguém construindo produto ou \
 planejando carreira deveria tirar disso.
 
-## 🔬 Técnico
-Papers, novos modelos, benchmarks, avanços de arquitetura, resultados \
-empíricos.
+## 🤖 IA
+Tudo relacionado a inteligência artificial: pesquisa, novos modelos, \
+lançamentos, features, integrações, movimentos de mercado, ética e \
+impacto social da IA. Máximo 15 itens — se houver mais Tier A+B, \
+priorize os de maior impacto e omita o resto.
 
-## 🚀 Produto
-Lançamentos, features, integrações, movimentos de empresas com \
-consequência real para produto. Corte drama corporativo puro.
+## 🔒 Cyber
+Notícias de segurança cibernética: ataques, incidentes, campanhas \
+maliciosas, movimentos de grupos de ameaça, defesas, políticas de \
+segurança. NÃO inclui CVEs individuais nem exploits — esses vão em \
+Vulnerabilidades. Inclui intersecção entre IA e segurança (ex: ataques \
+com LLMs, deepfakes maliciosos). Máximo 15 itens.
 
-## 🌍 Sociedade
-Regulação, ética, impacto no trabalho, segurança, política pública.
+## 🛡️ Vulnerabilidades
+CVEs críticos, exploits ativos, patches urgentes e alertas de agências \
+como CISA. Foco em: o que precisa de atualização imediata, o que está \
+sendo explorado ativamente, e qual o impacto real. Priorize CVEs com \
+CVSS alto (≥7.0), exploração ativa confirmada ou alertas oficiais de \
+agências (CISA KEV). Máximo 10 itens.
 
 PASSO 3 — FORMATO DE CADA ITEM:
 
@@ -127,6 +140,16 @@ texto do link — NUNCA a palavra genérica "Fonte". Formato: \
 `[Anthropic](https://...) / [Import AI](https://...)`.
   - NÃO repita a frase ou formulação do gancho. Continue a história, \
 não recomece.
+  - OPCIONAL — Especialista citado: se o artigo citar diretamente uma \
+fala ou posição de um pesquisador amplamente reconhecido na área de IA \
+(ex: líderes de lab, autores de papers seminais, figuras com histórico \
+consolidado como Yann LeCun, Geoffrey Hinton, Andrej Karpathy, Sam \
+Altman, Demis Hassabis, etc.), adicione após o parágrafo do corpo \
+(e antes da fonte) uma linha em blockquote no formato exato: \
+`> **Nome** (cargo/empresa) — "trecho ou ponto de vista conforme o artigo"` \
+— SOMENTE se a citação for direta e verificável no artigo. Se não houver \
+especialista citado ou a pessoa não for amplamente reconhecida, omita \
+completamente. Nunca invente. Máximo 1 por item.
 
 PASSO 4 — REGRAS EDITORIAIS:
 
@@ -141,10 +164,9 @@ Se são temas diferentes, separe em itens distintos — não force junção.
 - Não invente informação. Se um artigo é só headline sem substância, \
 ele é Tier C e é omitido — não faça item fraco "pra não desperdiçar".
 - O parágrafo 1 SEMPRE usa `**...**` no título (vira `<strong>` no HTML).
-- Cada seção (`## TL;DR`, `## 🔬 Técnico`, `## 🚀 Produto`, \
-`## 🌍 Sociedade`) aparece EXATAMENTE UMA VEZ. Nunca repita um \
-cabeçalho de seção. Se tiver muitos itens em Técnico, coloque-os todos \
-em sequência dentro da mesma seção, sem abrir um segundo `## 🔬 Técnico`.
+- Cada seção (`## Visão Geral`, `## 🤖 IA`, `## 🔒 Cyber`, \
+`## 🛡️ Vulnerabilidades`) aparece EXATAMENTE UMA VEZ. Se não houver \
+conteúdo para uma seção, escreva apenas `_Sem destaques hoje._`.
 
 ARTIGOS:
 
@@ -156,7 +178,7 @@ REVISÃO OBRIGATÓRIA DA RESPOSTA ANTERIOR:
 - A resposta anterior ficou subcoberta para o volume de artigos recebido.
 - Refaça o digest do zero, sem resumir demais.
 - Cubra os temas realmente importantes do dia em múltiplos itens quando necessário.
-- Mantenha a estrutura exigida com TL;DR + seções + itens em dois parágrafos.
+- Mantenha a estrutura exigida com Visão Geral + seções + itens em dois parágrafos.
 - Não encerre cedo; entregue um digest completo antes de finalizar.
 """
 
@@ -220,8 +242,9 @@ def _gerar_via_gemini(prompt_usuario):
     """
     Gera resumo usando Gemini 2.5 Flash via Google AI Studio (tier grátis).
 
-    Faz retry em erros transitórios (503 UNAVAILABLE, 429 RESOURCE_EXHAUSTED)
-    comuns em horário de pico. Até 3 tentativas com backoff 10s → 30s.
+    Retenta indefinidamente em erros transitórios (503/429), com backoff
+    crescente até 5min entre tentativas. Só desiste em erros permanentes
+    (autenticação, modelo inválido, etc.).
     """
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
@@ -232,18 +255,19 @@ def _gerar_via_gemini(prompt_usuario):
     _ULTIMO_MODELO = f"Gemini 2.5 Flash ({MODELO_GEMINI})"
     cliente = genai.Client(api_key=api_key)
 
-    tentativas = 3
-    backoff = [0, 10, 30]
-    erro_transitorio = (503, 429)
+    ERRO_TRANSITORIO = (503, 429)
+    # Backoff: 30s → 60s → 120s → 300s → 300s → 300s... (cap em 5min)
+    BACKOFFS = [0, 30, 60, 120, 300]
+    tentativa = 0
 
-    for i in range(tentativas):
-        if backoff[i] > 0:
-            print(
-                f"[resumo] aguardando {backoff[i]}s antes de retry "
-                f"(tentativa {i + 1}/{tentativas})..."
-            )
-            time.sleep(backoff[i])
+    while True:
+        espera = BACKOFFS[min(tentativa, len(BACKOFFS) - 1)]
+        if espera > 0:
+            print(f"[resumo] aguardando {espera}s antes de retry (tentativa {tentativa + 1})...")
+            time.sleep(espera)
         try:
+            print(f"[resumo] enviando requisição (tentativa {tentativa + 1}, aguardando resposta)...")
+            t0 = time.time()
             resposta = cliente.models.generate_content(
                 model=MODELO_GEMINI,
                 contents=prompt_usuario,
@@ -252,8 +276,8 @@ def _gerar_via_gemini(prompt_usuario):
                     max_output_tokens=MAX_TOKENS,
                 ),
             )
+            print(f"[resumo] resposta recebida em {time.time() - t0:.1f}s.")
             uso = resposta.usage_metadata
-            # Detecta truncamento: finish_reason "MAX_TOKENS" indica teto atingido.
             truncado = False
             try:
                 finish = str(resposta.candidates[0].finish_reason)
@@ -269,10 +293,11 @@ def _gerar_via_gemini(prompt_usuario):
             return resposta.text, truncado
         except (genai_errors.ServerError, genai_errors.ClientError) as e:
             codigo = getattr(e, "code", None)
-            if codigo in erro_transitorio and i < tentativas - 1:
-                print(f"[resumo] erro transitório {codigo}, tentando de novo...")
+            if codigo in ERRO_TRANSITORIO:
+                print(f"[resumo] erro transitório {codigo} — vai tentar de novo...")
+                tentativa += 1
                 continue
-            raise
+            raise  # erro permanente (auth, modelo inválido, etc.) — desiste
 
 
 def _validar_integridade(resumo_markdown):
@@ -305,7 +330,7 @@ def _validar_integridade(resumo_markdown):
         )
 
     # Cada seção obrigatória deve ter ao menos 1 linha de conteúdo depois.
-    obrigatorios = ("## TL;DR", "## 🔬 Técnico", "## 🚀 Produto", "## 🌍 Sociedade")
+    obrigatorios = ("## Visão Geral", "## 🤖 IA", "## 🔒 Cyber", "## 🛡️ Vulnerabilidades")
     for secao in obrigatorios:
         # Acha a seção e verifica se tem conteúdo até o próximo ## ou fim.
         idx = resumo_markdown.find(secao)
@@ -324,7 +349,7 @@ def _validar_integridade(resumo_markdown):
 
 def _mesclar_secoes_duplicadas(resumo_markdown):
     """
-    Se o LLM repetir um cabeçalho de seção (ex: dois '## 🔬 Técnico'),
+    Se o LLM repetir um cabeçalho de seção (ex: dois '## 🔬 Pesquisa'),
     mescla o conteúdo das ocorrências duplicadas na primeira.
 
     Isso acontece quando o output é muito longo ou quando a continuação
@@ -332,7 +357,7 @@ def _mesclar_secoes_duplicadas(resumo_markdown):
     """
     # Divide o markdown em (cabeçalho, conteúdo) preservando a ordem
     partes = re.split(r"(^##\s.+$)", resumo_markdown, flags=re.MULTILINE)
-    # partes = ['preâmbulo', '## TL;DR', '\nconteudo', '## Técnico', '\nconteudo', ...]
+    # partes = ['preâmbulo', '## Visão Geral', '\nconteudo', '## Técnico', '\nconteudo', ...]
 
     # Agrega conteúdo por cabeçalho, mantendo a primeira ocorrência de cada
     from collections import OrderedDict
@@ -383,7 +408,7 @@ def _validar_resumo(resumo_markdown, quantidade_artigos):
     devolve um digest muito curto para um lote grande de artigos.
     """
     erros = []
-    obrigatorios = ("## TL;DR", "## 🔬 Técnico", "## 🚀 Produto", "## 🌍 Sociedade")
+    obrigatorios = ("## Visão Geral", "## 🤖 IA", "## 🔒 Cyber", "## 🛡️ Vulnerabilidades")
     faltando = [secao for secao in obrigatorios if secao not in resumo_markdown]
     if faltando:
         erros.append("seções obrigatórias ausentes")
@@ -410,17 +435,7 @@ def _chamar_provedor(prompt_usuario):
     if PROVEDOR == "anthropic":
         return _gerar_via_anthropic(prompt_usuario)
     if PROVEDOR == "gemini":
-        try:
-            return _gerar_via_gemini(prompt_usuario)
-        except Exception as e:
-            if not os.getenv("ANTHROPIC_API_KEY"):
-                print("[resumo] Gemini falhou e não há ANTHROPIC_API_KEY pra fallback — abortando.")
-                raise
-            print(
-                f"[resumo] Gemini falhou ({type(e).__name__}). "
-                "Fallback automático: tentando Anthropic..."
-            )
-            return _gerar_via_anthropic(prompt_usuario)
+        return _gerar_via_gemini(prompt_usuario)
 
     raise ValueError(
         f"LLM_PROVIDER inválido no .env: '{PROVEDOR}'. "
@@ -438,7 +453,7 @@ def _montar_prompt_continuacao(prompt_original, texto_parcial):
         "---\n"
         "A sua resposta anterior foi truncada por limite de tokens. "
         "Continue EXATAMENTE de onde parou — não repita nada, não "
-        "recomece com '## TL;DR', não reescreva seções já feitas. "
+        "recomece com '## Visão Geral', não reescreva seções já feitas. "
         "Apenas continue do caractere exato em que a frase abaixo foi "
         "cortada, mantendo formato e estilo. Se estava no meio de uma "
         "palavra, complete a palavra primeiro.\n\n"

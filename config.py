@@ -57,4 +57,18 @@ FEEDS = [
     ("Stratechery", "https://stratechery.com/feed/", "primario"),
     ("Latent Space", "https://www.latent.space/feed", "primario"),
     ("SemiAnalysis", "https://semianalysis.com/feed/", "primario"),
+
+    # --- Cyber Security ---
+    ("Krebs on Security", "https://krebsonsecurity.com/feed/", "primario"),
+    ("Schneier on Security", "https://www.schneier.com/blog/atom.xml", "primario"),
+    ("The Hacker News", "https://feeds.feedburner.com/TheHackersNews", "secundario"),
+    ("Bleeping Computer", "https://www.bleepingcomputer.com/feed/", "secundario"),
+    ("Dark Reading", "https://www.darkreading.com/rss.xml", "secundario"),
+    ("SecurityWeek", "https://feeds.feedburner.com/securityweek", "secundario"),
+    ("CISA Alerts", "https://www.cisa.gov/cybersecurity-advisories/all.xml", "primario"),
+    ("CISO Advisor", "https://cisoadvisor.com.br/feed/", "secundario"),
+    ("CrowdStrike", "https://www.crowdstrike.com/en-us/blog/feed/", "primario"),
+
+    # --- Vulnerabilidades ---
+    ("Exploit-DB", "https://www.exploit-db.com/rss.xml", "primario"),
 ]

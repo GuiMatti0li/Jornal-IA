@@ -11,8 +11,11 @@ Fluxo:
 
 import sys
 from collections import Counter
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
+
+TZ_BR = ZoneInfo("America/Sao_Paulo")
 
 from collector import coletar_artigos
 from config import HORAS_JANELA
@@ -99,7 +102,7 @@ def main():
         sys.exit(1)
 
     # Prepende cabeçalho com o período coberto, contagem de itens e modelo.
-    agora_local = datetime.now()
+    agora_local = datetime.now(timezone.utc).astimezone(TZ_BR)
     inicio_local = agora_local - timedelta(hours=HORAS_JANELA)
     fmt = "%d/%m/%Y %H:%M"
     modelo_usado = get_ultimo_modelo()
@@ -107,7 +110,7 @@ def main():
     cabecalho = (
         f"*Período coberto: {inicio_local.strftime(fmt)} — "
         f"{agora_local.strftime(fmt)} "
-        f"· {len(artigos)} artigos coletados · {n_itens} itens no digest*\n"
+        f"· {len(artigos)} artigos coletados · {n_itens} itens no jornal*\n"
         f"*Processado por: {modelo_usado}*\n\n"
     )
     resumo = cabecalho + resumo
@@ -125,8 +128,9 @@ def main():
     # segue em frente e manda o email sem link interativo)
     print("\n[4/5] Publicando versão web no Netlify...")
     url_interativa = None
+    url_arquivo = None
     try:
-        url_interativa = publicar()
+        url_interativa, url_arquivo = publicar()
     except Exception as e:
         print(f"[aviso] Falha ao publicar no Netlify: {type(e).__name__}: {e}")
         print("[aviso] Seguindo sem versão web.")
@@ -135,7 +139,8 @@ def main():
     print("\n[5/5] Enviando email...")
     modelo_usado = get_ultimo_modelo()
     try:
-        enviar_email(None, resumo, url_interativa=url_interativa, modelo=modelo_usado)
+        enviar_email(None, resumo, url_interativa=url_interativa,
+                     modelo=modelo_usado, url_arquivo=url_arquivo)
     except Exception as e:
         print(f"[erro] Falha ao enviar email: {type(e).__name__}: {e}")
         sys.exit(1)
